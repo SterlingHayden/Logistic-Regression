@@ -1,0 +1,162 @@
+---
+title: "HW-03"
+author: "Sterling Hayden"
+date: "2024-09-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(Hmisc) #concordance %
+library(ROCit) #ROC curve
+library(caret) #confusion matrix
+```
+# Data Prep
+
+```{r}
+#read in data
+bank_bin <- read.csv("insurance_t_bin.csv")
+
+#check for missing vals
+colnames(bank_bin)[colSums(is.na(bank_bin)) > 0]
+```
+
+
+```{r}
+# replace NA with MISSING
+ins.t.bin = bank_bin %>%
+  mutate(
+    INV = ifelse(is.na(INV),"MISSING",INV),
+    CC = ifelse(is.na(CC),"MISSING",CC),
+    CCPURC = ifelse(is.na(CCPURC),"MISSING",CCPURC),
+    HMOWN = ifelse(is.na(HMOWN),"MISSING",HMOWN)
+  )
+```
+
+```{r}
+#checking for linear seperation
+for(i in colnames(ins.t.bin)){
+  print("---------------------------------------")
+  print(i)
+  print(table(ins.t.bin$INS, ins.t.bin[[i]]))
+}
+
+#Note: INS is the rows, and variable of interest is the columns
+```
+```{r}
+# fixing Quasi-separation
+ins.t.bin = ins.t.bin %>%
+  mutate(
+    CASHBK = ifelse(CASHBK > 0, "1+", CASHBK),
+    MMCRED = ifelse(MMCRED > 2, "3+", MMCRED)
+  )
+```
+
+
+
+# Model Building
+I will be using the best model from phase 2
+```{r}
+best.model <- glm(formula = INS ~ DDA + NSF + IRA + INV + MTG + CC + DDABAL_BIN + 
+    CHECKS_BIN + TELLER_BIN + SAVBAL_BIN + ATMAMT_BIN + CDBAL_BIN + 
+    ILSBAL_BIN + MMBAL_BIN + DDA:IRA, family = binomial(link = "logit"), 
+    data = ins.t.bin)
+```
+
+
+Rank each of the variables by p-value (one p-value per variable). 
+```{r}
+car::Anova(for.model, test = "LR", type = "III", singular.ok = T)
+```
+
+
+# Probability Metrics
+Concordance percentage & Discrimination slope
+```{r}
+ins.t.bin$p_hat <- predict(best.model, type = "response")
+
+#Discrimination slope 
+p1 <- ins.t.bin$p_hat[ins.t.bin$INS == 1]
+p0 <- ins.t.bin$p_hat[ins.t.bin$INS == 0]
+coef_discrim <- mean(p1) - mean(p0)
+print(paste("The coefficient of discrimination is ",coef_discrim))
+
+ggplot(ins.t.bin, aes(p_hat, fill = factor(INS))) +
+  geom_density(alpha = 0.7) +
+  scale_fill_grey() +
+  labs(x = "Predicted Probability",
+       fill = "Outcome",
+       title = paste("Coefficient of Discrimination = ",
+                     round(coef_discrim, 3), sep = ""))
+```
+
+
+```{r}
+#Concordance percentage
+somers2(ins.t.bin$p_hat, ins.t.bin$INS)
+```
+The concordance percentage = 0.7997675
+
+
+# Classification Metrics
+ROC curve & K-S Statistic
+```{r}
+logit_roc <- rocit(ins.t.bin$p_hat, ins.t.bin$INS)
+plot(logit_roc)
+plot(logit_roc)$optimal
+```
+This suggests that the optimal cutoff is at 0.2970672 
+
+
+```{r}
+ksplot(logit_roc)
+ksplot(logit_roc)$`KS Cutoff`
+```
+Once again we see the optimal cutoff is at 0.2970672
+
+
+# Looking at the preformance of model on the validation data set
+confusion matrix, accuracy, & lift
+```{r}
+#read in the validation data
+ins.v.bin <- read.csv("insurance_t_bin.csv")
+
+#do the same data prep we did for the training data to the validation data
+ins.v.bin = ins.v.bin %>%
+  mutate(
+    INV = ifelse(is.na(INV),"MISSING",INV),
+    CC = ifelse(is.na(CC),"MISSING",CC),
+    CCPURC = ifelse(is.na(CCPURC),"MISSING",CCPURC),
+    HMOWN = ifelse(is.na(HMOWN),"MISSING",HMOWN)
+  )
+
+ins.t.bin = ins.t.bin %>%
+  mutate(
+    CASHBK = ifelse(CASHBK > 0, "1+", CASHBK),
+    MMCRED = ifelse(MMCRED > 2, "3+", MMCRED)
+  )
+```
+confusion matrix and accuracy
+```{r}
+#predict probabilities on the validation set
+ins.v.bin$p_hat <- predict(best.model, newdata = ins.v.bin, type = "response")
+
+# Use the cutoff found earlier
+cutoff <- 0.2970672
+ins.v.bin$predicted_class <- ifelse(ins.v.bin$p_hat >= cutoff, 1, 0)
+
+#create the confusion matrix
+confusionMatrix(as.factor(ins.v.bin$predicted_class), as.factor(ins.v.bin$INS))
+
+```
+
+lift stats
+```{r}
+logit_roc <- rocit(ins.v.bin$p_hat, ins.v.bin$INS)
+
+logit_lift <- gainstable(logit_roc)
+print(logit_lift)
+plot(logit_lift, type = 2)
+
+```

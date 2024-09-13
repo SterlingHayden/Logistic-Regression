@@ -1,0 +1,220 @@
+---
+title: "HW2_team"
+output: html_document
+date: "2024-09-01"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(DescTools)
+library(writexl)
+library(tidyverse)
+library(car)
+library(mgcv)
+library(car)
+```
+
+
+```{r}
+bank_bin <- read.csv("insurance_t_bin.csv")
+```
+
+```{r}
+#finding alpha level based on sample size
+print(pchisq(log(nrow(bank_bin)),1,lower.tail = F))
+# alpha level from above test is 0.002630927
+```
+
+
+```{r}
+#finding categories with mising values
+ulist <- lapply(bank_bin, unique)
+ulist
+#View(bank_bin)
+```
+
+
+For any variable with missing values, change the data to include a missing category instead of a missing value for the categorical variable. 
+  - (HINT: Now all variables should be categorized (treated as categorical variables so no more continuous variable assumptions) and without missing values. Banks 
+          do this for more advanced modeling purposes that we will talk about in the spring.)
+          
+#I found INV, CC, CCPURC, and HMOWN to have missing values that will need to be updated  
+
+```{r}
+# changing all int columns to character columns so a new missing "M" category can be added 
+bank_bin1 <- bank_bin %>% mutate(across(where(is.integer), as.character))
+
+#replacing all NA with an indicator "M"
+bank_bin1 <- bank_bin1 %>% replace(is.na(.),"M")
+
+#checking the 4 variables that had NA in original dataset
+print(unique(bank_bin$INV))
+print(unique(bank_bin$CC))
+print(unique(bank_bin$CCPURC))
+print(unique(bank_bin$HMOWN))
+
+#checking to see if the NA's were replaced with "M" in bank_bin1
+print(unique(bank_bin1$INV))
+print(unique(bank_bin1$CC))
+print(unique(bank_bin1$CCPURC))
+print(unique(bank_bin1$HMOWN))
+
+
+```
+
+#Check each variable for separation concerns. Document in the report and adjust any variables with complete or quasi-separation concerns
+
+```{r}
+vars <- colnames(bank_bin1)
+
+for(i in vars){
+  print("---------------------------------------")
+  print(i)
+  print(table(bank_bin1$INS, bank_bin1[[i]]))
+}
+#reminder for danny --> INS will be the rows, and bank_bin[[i]] will be the columns
+```
+
+#I found 2 variables with quasi-complete seperation (and none with complete seperation)
+CASHBK, MMCRED
+
+```{r}
+print(table(bank_bin1$INS, bank_bin1$CASHBK))
+```
+
+#CASHBK
+(CASHBK = 2) has no occurrences of (INS = 1), so will merge (CASHBK = 2) with (CASHBK = 1) into "1+"
+
+
+```{r}
+#fixing CASHBK by merging (CASHBK = 1 | CASHBK = 2) into (CASHBK = "1+")
+bank_bin1$CASHBK.c <- as.character(bank_bin1$CASHBK)
+bank_bin1$CASHBK.c[which(bank_bin1$CASHBK %in% c("1","2"))] <- "1+"
+#print(table(bank_bin1$CASHBK.c, bank_bin$CASHBK))
+print(table(bank_bin1$INS, bank_bin1$CASHBK.c))
+```
+
+```{r}
+print(table(bank_bin1$INS, bank_bin1$MMCRED))
+```
+#MMCRED
+
+(MMCRED = 5) only has no occurrences of (INS = 1), so will merge (MMCRED = 5) with (MMCRED = 3) into "3+"
+    note for danny: MMCRED = 4 does not exist in the training dataset
+    Dr. Labarr --> should we also be checking in the validation set for seperation
+
+```{r}
+#fixing MMCRED by merging (MMCRED = 3 | MMCRED = 5) into (MMCRED = "3+), and using a new variable MMCRED.c 
+bank_bin1$MMCRED.c <- as.character(bank_bin1$MMCRED)
+bank_bin1$MMCRED.c[which(bank_bin1$MMCRED %in% c("3","5"))] <- "3+"
+print(table(bank_bin1$INS, bank_bin1$MMCRED.c))
+```
+
+```{r}
+#dropping CASHBK and MMCRED columns
+bank_bin2 <- subset(bank_bin1, select = -c(CASHBK, MMCRED ))
+#print(table(bank_bin1$INS, bank_bin1$CASHBK.c))
+#print(table(bank_bin1$INS, bank_bin1$MMCRED.c))
+```
+
+```{r}
+vars1 <- colnames(bank_bin1)
+vars2 <- colnames(bank_bin2)
+
+#for(i in vars2){
+  #print("---------------------------------------")
+  #print(i)
+  #print(table(bank_bin$INS, bank_bin[[i]]))}
+
+#making sure the two new columns were added, and they were --> 50 versus 48 ok as the old dataset had 48 original columns and then 2 new columns, 
+    #and the new dataset has 46 of the original columns and then two of its columns were updated to avoid quasi-seperation (so 48 in total)
+print(length(vars1))
+print(length(vars2))
+diff <- setdiff(vars1, vars2)
+diff
+```
+#Build a main effects only binary logistic regression model to predict the purchase of the insurance product
+```{r}
+str(bank_bin2)
+print(unique(bank_bin2$INS))
+```
+
+```{r}
+
+#bank_bin1 <- bank_bin1 %>% mutate(across(where(is.character), as.factor))
+
+#Use backward selection to do the variable selection – the Bank currently uses alpha = 0.002,and p-values to perform backward selection
+full.model <- glm(factor(INS) ~ . , 
+                  data = bank_bin2, family = binomial(link = "logit"))
+empty.model <- glm(factor(INS) ~ 1 , 
+                  data = bank_bin2, family = binomial(link = "logit"))
+summary(full.model) 
+```
+
+```{r}
+back.model <- step(full.model,
+                  scope = list(lower = empty.model,
+                               upper = full.model),
+                  direction = "backward", k = qchisq(0.002, 1, lower.tail =  FALSE))
+
+```
+```{r}
+summary(back.model)
+```
+
+```{r}
+#summary(back.model)
+#odds ration backward selection model
+(exp(cbind(coef(back.model))))
+```
+
+```{r}
+#investigating the issue with the CCM category having NA/singularities issues
+table(bank_bin2$INV, bank_bin2$CC)
+#car::vif(back.model) #--> does not run due to the following error: there are aliased coefficients in the model
+alias(back.model)
+```
+
+```{r}
+#trying to do equivalent of a SAS proc freq
+three_way <- xtabs(~ CC + INV + INS, data=bank_bin2) 
+table <- ftable(three_way)
+#table
+three_way
+```
+
+
+```{r}
+#list of vars that the backwards selection model chose DDA NSF IRA INV INVM MTG CC DDABAL_BIN CHECKS_BIN TELLER_BIN
+#TELLER_BIN SAVBAL_BIN ATMAMT_BIN CDBAL_BIN ILSBAL_BIN MMBAL_BIN
+
+```
+
+
+```{r}
+#Forward Selection p value 0.002
+full.model1 <- glm(factor(INS) ~ (DDA + NSF + IRA + INV + INV + MTG + CC + DDABAL_BIN + CHECKS_BIN  +
+TELLER_BIN + SAVBAL_BIN + ATMAMT_BIN + CDBAL_BIN + ILSBAL_BIN + MMBAL_BIN)^2, data = bank_bin2, family = binomial(link = "logit"))
+
+empty.model1 <- glm(factor(INS) ~ 1, data = bank_bin2, family = binomial(link = "logit"))
+
+for.model <- step(empty.model1,
+                  scope = list(lower = empty.model1,
+                               upper = full.model1),
+                  direction = "forward", k = qchisq(0.002, 1, lower.tail =  FALSE))
+```
+
+
+```{r}
+summary(for.model)
+```
+
+```{r}
+interaction1 <- xtabs(~ DDA + INS + IRA, data=bank_bin2) 
+interaction1
+
+#interaction2 <- xtabs(~ IRA + INS + DDA , data=bank_bin2) 
+#interaction2
+#danny does not see separation issue with interaction
+```
+

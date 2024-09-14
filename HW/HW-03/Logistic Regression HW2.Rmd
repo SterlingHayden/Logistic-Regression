@@ -1,0 +1,170 @@
+---
+title: "Logistic Regression HW2"
+author: "Eric Miller"
+date: "2024-08-25"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning = F, message = F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+
+ins.t.bin.raw = read.csv("insurance_t_bin.csv")
+ins.v.bin.raw = read.csv("insurance_v_bin.csv")
+```
+
+# Objective – Phase 2
+
+##The scope of services in this phase includes the following:
+
+- For this phase use only the binned training data set.
+
+### 1. Based on your first report, the Bank has strategically binned each of the continuous variables in the data set to help facilitate any further analysis.
+
+1A. For any variable with missing values, change the data to include a missing category instead of a missing value for the categorical variable.
+  - (HINT: Now all variables should be categorized (treated as categorical variables so no more continuous variable assumptions) and without missing values. Banks do this for more advanced modeling purposes that we will talk about in the spring.)
+  
+```{r}
+ins.t.bin = ins.t.bin.raw %>%
+  mutate(
+    INV = ifelse(is.na(INV),"MISSING",INV),
+    CC = ifelse(is.na(CC),"MISSING",CC),
+    CCPURC = ifelse(is.na(CCPURC),"MISSING",CCPURC),
+    HMOWN = ifelse(is.na(HMOWN),"MISSING",HMOWN)
+  )
+
+#colSums(is.na(ins.t.bin))
+```
+
+1B. Check each variable for separation concerns. Document in the report and adjust any variables with complete or quasi-separation concerns.
+
+Variables with full separation: NONE
+
+Variables with quasi-separation: CASHBK, MMCRED
+
+Because these are ordinal variables and the quasi-separation happened at the ends of the possible values, the end values that had quasi-separation were combined with the nearest value without quasi-separation. (For example, the MMCRED observations that were 3 and 5 were combined to a new category "3+" since there was quasi-separation with the original "5" category.)
+
+```{r}
+for(i in colnames(ins.t.bin)){
+  print("---------------------------------------")
+  print(i)
+  print(table(ins.t.bin$INS, ins.t.bin[[i]]))
+}
+
+#Note: INS is the rows, and variable of interest is the columns
+```
+
+```{r Repairing Quasi-separation}
+ins.t.bin = ins.t.bin %>%
+  mutate(
+    CASHBK = ifelse(CASHBK > 0, "1+", CASHBK),
+    MMCRED = ifelse(MMCRED > 2, "3+", MMCRED)
+  )
+```
+
+### 2. Build a main effects only binary logistic regression model to predict the purchase of the insurance product.
+
+2A. Use backward selection to do the variable selection – the Bank currently uses alpha = 0.002 and p-values to perform backward, but is open to another technique and/or significance level if documented in your report.
+
+As in part 1, we believe that it is best to use an alpha level of 0.002 because of the Bank's current practices and the fact that this is an appropriate p-value for the sample size of the training data set.
+
+```{r setting up full model}
+ins.t.bin = ins.t.bin %>%
+  mutate(across(where(is.character), as.factor))
+
+full.model <- glm(INS ~ ., data = ins.t.bin, family = binomial(link = "logit"))
+
+summary(full.model)
+
+table(ins.t.bin$CC, ins.t.bin$CCPURC)
+print("next table")
+table(ins.t.bin$POS_BIN, ins.t.bin$POSAMT_BIN)
+```
+
+```{r running backwards variable selection}
+back.model <- step(full.model, direction = "backward", k = qchisq(0.002, 1, lower.tail=F), trace=F)
+
+summary(back.model)
+```
+
+2B. Report the final variables from this model ranked by p-value.
+    - (HINT: Even if you choose to not use p-values to select your variables, you should still rank all final variables by their p-value in this report.)
+    
+```{r}
+alias(back.model)
+
+a = car::Anova(back.model, test = "LR", type = "III", singular.ok = T)
+```
+
+### 3. Interpret one variable’s odds ratio from your final model as an example.
+
+One interpretation: A person having an IRA account will be 1.59 times as likely to purchase the insurance as someone without an IRA account on average, holding all else constant.
+
+Interesting findings:
+- Relationship between binary variables and "MISSING" category. Is "MISSING" better or worse than no?
+- For DDABAL, anything above 82.57 increases INS odds, and as you go up in DDABAL category it continues to increase INS odds.
+- CHECKS behaves the opposite
+- For SAVBAL, below a certain point is worse than no savings account, but then it gets better and better. This could be explained by savings accounts at other banks potentially.
+
+3A. Report on any interesting findings from your odds ratios from your model.
+    - (HINT: This is open-ended and has no correct answer. However, you should get use to keeping an eye out for what you might deem important or interesting when exploring data to report in an executive summary.)
+    
+```{r}
+(exp(cbind(coef(back.model))))
+```
+
+### 4. Investigate possible interactions using forward selection including only the main effects from your previous final model.
+
+```{r}
+int.model = glm(formula = INS ~ (DDA + NSF + IRA + INV + MTG + CC + DDABAL_BIN + 
+    CHECKS_BIN + TELLER_BIN + SAVBAL_BIN + ATMAMT_BIN + CDBAL_BIN + 
+    ILSBAL_BIN + MMBAL_BIN)^2, family = binomial(link = "logit"), 
+    data = ins.t.bin)
+
+for.model <- step(back.model,
+                  scope = list(lower=formula(back.model),
+                               upper=formula(int.model)),
+                  direction = "forward", k = qchisq(0.002, 1, lower.tail=F))
+
+summary(for.model)
+```
+
+4A. Report the final interaction variables from this model ranked by p-value.
+
+```{r}
+car::Anova(for.model, test = "LR", type = "III", singular.ok = T)
+```
+
+### 5. Report your final logistic regression model’s variables by significance.
+  - (HINT: These steps are here to help you build your model, but not to tell you which order to write your report. Consider the most important information when done with these questions and write your report accordingly.)
+  
+See x dataframe for full list of detailed p values.
+  
+```{r}
+x = car::Anova(for.model, test = "LR", type = "III", singular.ok = T)[3]
+
+x = x %>%
+  arrange(`Pr(>Chisq)`)
+```
+
+## Data	Provided
+
+The following two sets of data are provided for the proposal:
+
+- The training data set insurance_t_bin contains 8,495 observations and 48 variables.
+  - All of these customers have been offered the product in the data set under the variable INS, which takes a value of 1 if they bought and 0 if they did not buy.
+  - There are 46 variables describing the customer’s attributes before they were offered the new insurance product.
+  - The Bank has strategically binned each of the continuous variables in the data set to
+help facilitate any further analysis.
+
+- The validation data set insurance_v_bin contains 2,124 observations and 48 variables.
+
+- The table below describes the Roles and Description of the variables found in both data sets.
+
+
+
+
+
+
+

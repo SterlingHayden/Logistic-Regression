@@ -112,6 +112,8 @@ This suggests that the optimal cutoff is at 0.2970672
 ```{r}
 ksplot(logit_roc)
 ksplot(logit_roc)$`KS Cutoff`
+ksplot(logit_roc)$`KS stat`
+
 ```
 Once again we see the optimal cutoff is at 0.2970672
 
@@ -120,7 +122,7 @@ Once again we see the optimal cutoff is at 0.2970672
 confusion matrix, accuracy, & lift
 ```{r}
 #read in the validation data
-ins.v.bin <- read.csv("insurance_t_bin.csv")
+ins.v.bin <- read.csv("insurance_v_bin.csv")
 
 #do the same data prep we did for the training data to the validation data
 ins.v.bin = ins.v.bin %>%
@@ -136,6 +138,10 @@ ins.t.bin = ins.t.bin %>%
     CASHBK = ifelse(CASHBK > 0, "1+", CASHBK),
     MMCRED = ifelse(MMCRED > 2, "3+", MMCRED)
   )
+```
+
+```{r}
+nrow(ins.v.bin)
 ```
 confusion matrix and accuracy
 ```{r}
@@ -157,6 +163,7 @@ logit_roc <- rocit(ins.v.bin$p_hat, ins.v.bin$INS)
 
 logit_lift <- gainstable(logit_roc)
 print(logit_lift)
-plot(logit_lift, type = 2)
+print(logit_lift)
+plot(logit_lift, type = 3)
 
 ```
